@@ -90,3 +90,28 @@ fn archives_are_disabled_when_indexing_disabled(
 
     Ok(())
 }
+
+#[rstest]
+fn test_streaming_zip_integration(
+    #[with(&["--enable-zip"])] server: TestServer,
+) -> Result<(), Error> {
+    // Test that ZIP download works with streaming implementation
+    let response = reqwest::blocking::get(server.url().join("?download=zip")?)?;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert_eq!(content_type, "application/zip");
+
+    let body = response.bytes()?;
+    assert!(!body.is_empty(), "ZIP download should return content");
+    assert!(
+        body.starts_with(b"PK"),
+        "Downloaded content should be a valid ZIP"
+    );
+
+    Ok(())
+}
