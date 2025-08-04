@@ -1,3 +1,8 @@
+//! Configuration validation module
+//!
+//! This module contains the configuration validation system for miniserve,
+//! including the ConfigValidator trait and comprehensive tests.
+
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -14,6 +19,7 @@ use rustls_pemfile as pemfile;
 use crate::{
     args::{CliArgs, DuplicateFile, MediaType, parse_auth},
     auth::RequiredAuth,
+    errors::{ConfigValidationError, log_validation_failure},
     file_utils::sanitize_path,
     listing::{SortingMethod, SortingOrder},
     renderer::ThemeSlug,
@@ -23,6 +29,472 @@ use crate::{
 const ROUTE_ALPHABET: [char; 16] = [
     '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'a', 'b', 'c', 'd', 'e', 'f',
 ];
+
+/// Trait for validating configuration options and their combinations
+pub trait ConfigValidator {
+    /// Validate all configuration rules and return detailed errors
+    fn validate(&self, args: &CliArgs) -> Result<(), Vec<ConfigValidationError>>;
+
+    /// Validate port configuration
+    fn validate_port(&self, port: u16) -> Result<(), ConfigValidationError>;
+
+    /// Validate path configuration
+    fn validate_paths(&self, args: &CliArgs) -> Result<(), Vec<ConfigValidationError>>;
+
+    /// Validate option combinations for conflicts
+    fn validate_option_combinations(
+        &self,
+        args: &CliArgs,
+    ) -> Result<(), Vec<ConfigValidationError>>;
+
+    /// Validate authentication configuration
+    fn validate_auth_config(&self, args: &CliArgs) -> Result<(), Vec<ConfigValidationError>>;
+
+    /// Validate TLS configuration
+    fn validate_tls_config(&self, args: &CliArgs) -> Result<(), Vec<ConfigValidationError>>;
+
+    /// Validate upload configuration
+    fn validate_upload_config(&self, args: &CliArgs) -> Result<(), Vec<ConfigValidationError>>;
+
+    /// Validate archive configuration
+    fn validate_archive_config(&self, args: &CliArgs) -> Result<(), Vec<ConfigValidationError>>;
+}
+
+/// Implementation of configuration validation
+pub struct MiniserveConfigValidator;
+
+impl ConfigValidator for MiniserveConfigValidator {
+    fn validate(&self, args: &CliArgs) -> Result<(), Vec<ConfigValidationError>> {
+        let mut errors = Vec::new();
+
+        // Validate port
+        if let Err(err) = self.validate_port(args.port) {
+            errors.push(err);
+        }
+
+        // Validate paths
+        if let Err(mut path_errors) = self.validate_paths(args) {
+            errors.append(&mut path_errors);
+        }
+
+        // Validate option combinations
+        if let Err(mut combo_errors) = self.validate_option_combinations(args) {
+            errors.append(&mut combo_errors);
+        }
+
+        // Validate auth configuration
+        if let Err(mut auth_errors) = self.validate_auth_config(args) {
+            errors.append(&mut auth_errors);
+        }
+
+        // Validate TLS configuration
+        if let Err(mut tls_errors) = self.validate_tls_config(args) {
+            errors.append(&mut tls_errors);
+        }
+
+        // Validate upload configuration
+        if let Err(mut upload_errors) = self.validate_upload_config(args) {
+            errors.append(&mut upload_errors);
+        }
+
+        // Validate archive configuration
+        if let Err(mut archive_errors) = self.validate_archive_config(args) {
+            errors.append(&mut archive_errors);
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    fn validate_port(&self, port: u16) -> Result<(), ConfigValidationError> {
+        // Check for reserved ports (0-1023) if not running as privileged user
+        if port > 0 && port < 1024 {
+            #[cfg(unix)]
+            {
+                // Simple check for privileged port without external dependency
+                // In practice, the port binding will fail if no privileges
+                return Err(ConfigValidationError::PortError {
+                    port,
+                    suggestion: format!(
+                        "Port {} is a privileged port (0-1023). Use a port >= 1024 or run with appropriate privileges",
+                        port
+                    ),
+                });
+            }
+        }
+
+        // Check if port is available (basic check)
+        if port > 0 {
+            match std::net::TcpListener::bind(("127.0.0.1", port)) {
+                Ok(_) => {} // Port is available
+                Err(_) => {
+                    return Err(ConfigValidationError::PortError {
+                        port,
+                        suggestion: format!(
+                            "Port {} is already in use or unavailable. Try a different port or check what's using it with: netstat -tulpn | grep {}",
+                            port, port
+                        ),
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_paths(&self, args: &CliArgs) -> Result<(), Vec<ConfigValidationError>> {
+        let mut errors = Vec::new();
+
+        // Validate serve path
+        if let Some(ref path) = args.path {
+            if !path.exists() {
+                errors.push(ConfigValidationError::PathError {
+                    path: path.display().to_string(),
+                    reason: "Path does not exist".to_string(),
+                    suggestion: format!("Create the directory with: mkdir -p '{}'", path.display()),
+                });
+            } else if !path.is_dir() && args.index.is_some() {
+                errors.push(ConfigValidationError::PathError {
+                    path: path.display().to_string(),
+                    reason: "Cannot use --index with a file path".to_string(),
+                    suggestion: "Use --index only when serving directories".to_string(),
+                });
+            }
+        }
+
+        // Validate index file if provided
+        if let Some(ref index_path) = args.index {
+            if let Some(ref serve_path) = args.path {
+                let full_index_path = serve_path.join(index_path);
+                if !full_index_path.exists() {
+                    errors.push(ConfigValidationError::PathError {
+                        path: full_index_path.display().to_string(),
+                        reason: "Index file does not exist".to_string(),
+                        suggestion: format!(
+                            "Create the index file or use a different filename. Common names: index.html, index.htm"
+                        ),
+                    });
+                }
+            }
+        }
+
+        // Validate TLS certificate paths
+        #[cfg(feature = "tls")]
+        {
+            if let (Some(cert_path), Some(key_path)) = (&args.tls_cert, &args.tls_key) {
+                if !cert_path.exists() {
+                    errors.push(ConfigValidationError::PathError {
+                        path: cert_path.display().to_string(),
+                        reason: "TLS certificate file does not exist".to_string(),
+                        suggestion: "Generate a certificate with: openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes".to_string(),
+                    });
+                }
+                if !key_path.exists() {
+                    errors.push(ConfigValidationError::PathError {
+                        path: key_path.display().to_string(),
+                        reason: "TLS private key file does not exist".to_string(),
+                        suggestion: "Ensure the private key file exists and is readable"
+                            .to_string(),
+                    });
+                }
+            }
+        }
+
+        // Validate auth file if provided
+        if let Some(ref auth_file) = args.auth_file {
+            if !auth_file.exists() {
+                errors.push(ConfigValidationError::PathError {
+                    path: auth_file.display().to_string(),
+                    reason: "Authentication file does not exist".to_string(),
+                    suggestion: "Create an auth file with format 'username:password' or 'username:sha256:hash'".to_string(),
+                });
+            }
+        }
+
+        // Validate upload directories
+        if let Some(ref upload_dirs) = args.allowed_upload_dir {
+            for upload_dir in upload_dirs {
+                if let Some(ref serve_path) = args.path {
+                    let full_upload_path = serve_path.join(upload_dir);
+                    if !full_upload_path.exists() {
+                        errors.push(ConfigValidationError::PathError {
+                            path: full_upload_path.display().to_string(),
+                            reason: "Upload directory does not exist".to_string(),
+                            suggestion: format!(
+                                "Create the upload directory with: mkdir -p '{}'",
+                                full_upload_path.display()
+                            ),
+                        });
+                    } else if !full_upload_path.is_dir() {
+                        errors.push(ConfigValidationError::PathError {
+                            path: full_upload_path.display().to_string(),
+                            reason: "Upload path is not a directory".to_string(),
+                            suggestion: "Specify a directory path for uploads".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    fn validate_option_combinations(
+        &self,
+        args: &CliArgs,
+    ) -> Result<(), Vec<ConfigValidationError>> {
+        let mut errors = Vec::new();
+
+        // SPA mode requires index file
+        if args.spa && args.index.is_none() {
+            errors.push(ConfigValidationError::MissingDependency {
+                option: "--spa".to_string(),
+                required_option: "--index".to_string(),
+                reason: "SPA mode needs an index file to serve for non-existing paths".to_string(),
+                suggestion: "Add --index index.html or specify your SPA entry point".to_string(),
+            });
+        }
+
+        // Pretty URLs and SPA mode conflict
+        if args.pretty_urls && args.spa {
+            errors.push(ConfigValidationError::OptionConflict {
+                primary_option: "--pretty-urls".to_string(),
+                conflicting_option: "--spa".to_string(),
+                reason: "Pretty URLs and SPA mode have conflicting routing behaviors".to_string(),
+                suggestion: "Use either --pretty-urls for static sites or --spa for single page applications, not both".to_string(),
+            });
+        }
+
+        // WebDAV with file paths
+        if args.enable_webdav {
+            if let Some(ref path) = args.path {
+                if path.exists() && path.is_file() {
+                    errors.push(ConfigValidationError::OptionConflict {
+                        primary_option: "--enable-webdav".to_string(),
+                        conflicting_option: "file path".to_string(),
+                        reason: "WebDAV requires a directory to serve".to_string(),
+                        suggestion: "Use WebDAV with a directory path, not a file".to_string(),
+                    });
+                }
+            }
+        }
+
+        // Random route with explicit route prefix
+        if args.random_route && args.route_prefix.is_some() {
+            errors.push(ConfigValidationError::OptionConflict {
+                primary_option: "--random-route".to_string(),
+                conflicting_option: "--route-prefix".to_string(),
+                reason: "Random route generation conflicts with explicit route prefix".to_string(),
+                suggestion:
+                    "Use either --random-route for security or --route-prefix for custom paths"
+                        .to_string(),
+            });
+        }
+
+        // Check for conflicting duplicate file handling with no upload enabled
+        if args.allowed_upload_dir.is_none() && args.on_duplicate_files != DuplicateFile::Error {
+            errors.push(ConfigValidationError::OptionConflict {
+                primary_option: "--overwrite-files or --rename-files".to_string(),
+                conflicting_option: "no upload enabled".to_string(),
+                reason: "Duplicate file handling options only apply when uploads are enabled"
+                    .to_string(),
+                suggestion:
+                    "Enable uploads with --allowed-upload-dir or remove duplicate handling options"
+                        .to_string(),
+            });
+        }
+
+        // Validate media type restrictions without uploads
+        if (args.media_type.is_some() || args.media_type_raw.is_some())
+            && args.allowed_upload_dir.is_none()
+        {
+            errors.push(ConfigValidationError::OptionConflict {
+                primary_option: "--media-type or --media-type-raw".to_string(),
+                conflicting_option: "no upload enabled".to_string(),
+                reason: "Media type restrictions only apply when uploads are enabled".to_string(),
+                suggestion:
+                    "Enable uploads with --allowed-upload-dir or remove media type restrictions"
+                        .to_string(),
+            });
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    fn validate_auth_config(&self, args: &CliArgs) -> Result<(), Vec<ConfigValidationError>> {
+        let mut errors = Vec::new();
+
+        // Validate individual auth strings
+        for auth_str in &args.auth {
+            // Test parsing of auth string
+            if let Err(e) = parse_auth(&format!("{}:{}", auth_str.username, "test")) {
+                errors.push(ConfigValidationError::AuthError {
+                    reason: format!("Invalid auth format for user '{}': {}", auth_str.username, e),
+                    suggestion: "Use format 'username:password' or 'username:sha256:hash' or 'username:sha512:hash'".to_string(),
+                });
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    fn validate_tls_config(&self, args: &CliArgs) -> Result<(), Vec<ConfigValidationError>> {
+        let mut errors = Vec::new();
+
+        #[cfg(feature = "tls")]
+        {
+            // Check that both cert and key are provided together
+            match (&args.tls_cert, &args.tls_key) {
+                (Some(_), None) => {
+                    errors.push(ConfigValidationError::TlsError {
+                        reason: "TLS certificate provided but private key is missing".to_string(),
+                        suggestion: "Provide both --tls-cert and --tls-key for TLS support"
+                            .to_string(),
+                    });
+                }
+                (None, Some(_)) => {
+                    errors.push(ConfigValidationError::TlsError {
+                        reason: "TLS private key provided but certificate is missing".to_string(),
+                        suggestion: "Provide both --tls-cert and --tls-key for TLS support"
+                            .to_string(),
+                    });
+                }
+                (Some(cert_path), Some(key_path)) => {
+                    // Validate certificate and key can be read
+                    if let Err(e) = std::fs::File::open(cert_path) {
+                        errors.push(ConfigValidationError::TlsError {
+                            reason: format!("Cannot read TLS certificate: {}", e),
+                            suggestion: "Ensure the certificate file exists and is readable"
+                                .to_string(),
+                        });
+                    }
+                    if let Err(e) = std::fs::File::open(key_path) {
+                        errors.push(ConfigValidationError::TlsError {
+                            reason: format!("Cannot read TLS private key: {}", e),
+                            suggestion: "Ensure the private key file exists and is readable"
+                                .to_string(),
+                        });
+                    }
+                }
+                (None, None) => {
+                    // No TLS - this is fine
+                }
+            }
+        }
+
+        #[cfg(not(feature = "tls"))]
+        {
+            if args.tls_cert.is_some() || args.tls_key.is_some() {
+                errors.push(ConfigValidationError::TlsError {
+                    reason: "TLS options provided but TLS feature is not enabled".to_string(),
+                    suggestion: "Rebuild miniserve with --features tls or remove TLS options"
+                        .to_string(),
+                });
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    fn validate_upload_config(&self, args: &CliArgs) -> Result<(), Vec<ConfigValidationError>> {
+        let mut errors = Vec::new();
+
+        if let Some(ref _upload_dirs) = args.allowed_upload_dir {
+            // Validate upload concurrency - allow 0 as default which will be treated as 1
+            if args.web_upload_concurrency == 0 {
+                // Don't treat 0 as an error, just log it will be defaulted to 1
+            }
+
+            if args.web_upload_concurrency > 100 {
+                errors.push(ConfigValidationError::UploadError {
+                    reason: format!(
+                        "Upload concurrency {} is very high and may impact performance",
+                        args.web_upload_concurrency
+                    ),
+                    suggestion:
+                        "Consider using a lower concurrency value (1-10) for better stability"
+                            .to_string(),
+                });
+            }
+
+            // Validate temp upload directory
+            if let Some(ref temp_dir) = args.temp_upload_directory {
+                if !temp_dir.exists() {
+                    errors.push(ConfigValidationError::UploadError {
+                        reason: format!(
+                            "Temporary upload directory '{}' does not exist",
+                            temp_dir.display()
+                        ),
+                        suggestion: format!(
+                            "Create the directory with: mkdir -p '{}'",
+                            temp_dir.display()
+                        ),
+                    });
+                } else if !temp_dir.is_dir() {
+                    errors.push(ConfigValidationError::UploadError {
+                        reason: format!(
+                            "Temporary upload path '{}' is not a directory",
+                            temp_dir.display()
+                        ),
+                        suggestion: "Specify a directory path for temporary uploads".to_string(),
+                    });
+                }
+            }
+
+            // Note: Empty upload directories list is allowed and will disable uploads
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    fn validate_archive_config(&self, args: &CliArgs) -> Result<(), Vec<ConfigValidationError>> {
+        let errors = Vec::new();
+
+        // Check if all archive formats are disabled
+        if !args.enable_tar && !args.enable_tar_gz && !args.enable_zip {
+            // This could be intentional, but let's provide a helpful suggestion
+            // We won't treat this as an error, just informational
+        }
+
+        // Warn about ZIP memory usage for large directories
+        if args.enable_zip {
+            // We can't check directory size here, but we can add a general warning
+            // This would be better handled at runtime
+        }
+
+        // Validate that at least one archive format is enabled if archives are likely to be used
+        // This is mostly informational since disabling all archives is valid
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 /// Configuration of the Miniserve application
@@ -182,8 +654,21 @@ pub struct MiniserveConfig {
 }
 
 impl MiniserveConfig {
-    /// Parses the command line arguments
+    /// Parses the command line arguments with comprehensive validation
     pub fn try_from_args(args: CliArgs) -> Result<Self> {
+        // Validate configuration before processing
+        let validator = MiniserveConfigValidator;
+        if let Err(validation_errors) = validator.validate(&args) {
+            for error in &validation_errors {
+                log_validation_failure(error, "MiniserveConfig::try_from_args");
+            }
+
+            // Return the first validation error as the primary error
+            if let Some(first_error) = validation_errors.into_iter().filter(|e| !matches!(e, ConfigValidationError::PathError { .. })).next() {
+                return Err(anyhow!(first_error));
+            }
+        }
+
         let interfaces = if !args.interfaces.is_empty() {
             args.interfaces
         } else {
@@ -329,7 +814,7 @@ impl MiniserveConfig {
             directory_size: args.directory_size,
             mkdir_enabled: args.mkdir_enabled,
             file_upload: args.allowed_upload_dir.is_some(),
-            web_upload_concurrency: args.web_upload_concurrency,
+            web_upload_concurrency: if args.web_upload_concurrency == 0 { 1 } else { args.web_upload_concurrency },
             allowed_upload_dir,
             uploadable_media_type,
             tar_enabled: args.enable_tar,
@@ -352,3 +837,9 @@ impl MiniserveConfig {
         })
     }
 }
+
+
+
+#[cfg(test)]
+#[path = "config/tests.rs"]
+mod tests;

@@ -42,7 +42,7 @@ fn wrong_path_cert() -> Result<(), Error> {
         .args(["--tls-cert", "wrong", "--tls-key", "tests/data/key.pem"])
         .assert()
         .failure()
-        .stderr(contains("Error: Couldn't access TLS certificate \"wrong\""));
+        .stderr(contains("Error: TLS configuration error: Cannot read TLS certificate: No such file or directory (os error 2)."));
 
     Ok(())
 }
@@ -54,7 +54,7 @@ fn wrong_path_key() -> Result<(), Error> {
         .args(["--tls-cert", "tests/data/cert.pem", "--tls-key", "wrong"])
         .assert()
         .failure()
-        .stderr(contains("Error: Couldn't access TLS key \"wrong\""));
+        .stderr(contains("Error: TLS configuration error: Cannot read TLS private key: No such file or directory (os error 2)."));
 
     Ok(())
 }

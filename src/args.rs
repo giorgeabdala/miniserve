@@ -16,7 +16,7 @@ pub enum MediaType {
     Video,
 }
 
-#[derive(Debug, ValueEnum, Clone, Default, Copy)]
+#[derive(Debug, ValueEnum, Clone, Default, Copy, PartialEq)]
 pub enum DuplicateFile {
     #[default]
     Error,

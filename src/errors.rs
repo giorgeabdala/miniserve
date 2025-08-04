@@ -19,8 +19,7 @@ pub enum StartupError {
     IoError(String, std::io::Error),
 
     /// In case miniserve was invoked without an interactive terminal and without an explicit path
-    #[error("Refusing to start as no explicit serve path was set and no interactive terminal was attached
-Please set an explicit serve path like: `miniserve /my/path`")]
+    #[error("Refusing to start as no explicit serve path was set and no interactive terminal was attached\nPlease set an explicit serve path like: `miniserve /my/path`")]
     NoExplicitPathAndNoTerminal,
 
     /// In case miniserve was invoked with --no-symlinks but the serve path is a symlink
@@ -29,37 +28,138 @@ Please set an explicit serve path like: `miniserve /my/path`")]
 
     #[error("The --enable-webdav option was provided, but the serve path '{0}' is a file")]
     WebdavWithFileServePath(String),
+
+    /// Configuration validation errors with detailed context
+    #[error("Configuration validation failed: {0}")]
+    ConfigValidationError(ConfigValidationError),
+}
+
+#[derive(Debug, Error)]
+pub enum ConfigValidationError {
+    /// Port conflicts or invalid port ranges
+    #[error("Port {port} is invalid or unavailable.\nSuggestion: {suggestion}")]
+    PortError { port: u16, suggestion: String },
+
+    /// Invalid file paths or access issues
+    #[error("Path '{path}' is invalid: {reason}.\nSuggestion: {suggestion}")]
+    PathError {
+        path: String,
+        reason: String,
+        suggestion: String,
+    },
+
+    /// Incompatible option combinations
+    #[error(
+        "Option conflict: {primary_option} cannot be used with {conflicting_option}.\nReason: {reason}\nSuggestion: {suggestion}"
+    )]
+    OptionConflict {
+        primary_option: String,
+        conflicting_option: String,
+        reason: String,
+        suggestion: String,
+    },
+
+    /// Missing required dependencies between options
+    #[error(
+        "Option '{option}' requires '{required_option}' to be set.\nReason: {reason}\nSuggestion: {suggestion}"
+    )]
+    MissingDependency {
+        option: String,
+        required_option: String,
+        reason: String,
+        suggestion: String,
+    },
+
+    /// Authentication configuration errors
+    #[error("Authentication configuration error: {reason}.\nSuggestion: {suggestion}")]
+    AuthError { reason: String, suggestion: String },
+
+    /// TLS configuration errors
+    #[error("TLS configuration error: {reason}.\nSuggestion: {suggestion}")]
+    TlsError { reason: String, suggestion: String },
+
+    /// Upload configuration validation errors
+    #[error("Upload configuration error: {reason}.\nSuggestion: {suggestion}")]
+    UploadError { reason: String, suggestion: String },
+
+    /// Archive configuration errors
+    #[error("Archive configuration error: {reason}.\nSuggestion: {suggestion}")]
+    ArchiveError { reason: String, suggestion: String },
+
+    /// General validation errors with suggestions
+    #[error("Validation error: {reason}.\nSuggestion: {suggestion}")]
+    General { reason: String, suggestion: String },
 }
 
 #[derive(Debug, Error)]
 pub enum RuntimeError {
-    /// Any kind of IO errors
-    #[error("{0}\ncaused by: {1}")]
-    IoError(String, std::io::Error),
+    /// Any kind of IO errors with enhanced context
+    #[error(
+        "I/O operation failed: {operation}\nPath: {path}\nCaused by: {source}\nSuggestion: {suggestion}"
+    )]
+    IoError {
+        operation: String,
+        path: String,
+        source: std::io::Error,
+        suggestion: String,
+    },
 
     /// Might occur during file upload, when processing the multipart request fails
-    #[error("Failed to process multipart request\ncaused by: {0}")]
+    #[error(
+        "Failed to process multipart upload request.\nDetails: {0}\nSuggestion: Check that the request contains valid multipart/form-data with proper field names"
+    )]
     MultipartError(String),
 
-    /// Might occur during file upload
-    #[error("File already exists, and the on_duplicate_files option is set to error out")]
-    DuplicateFileError,
+    /// Might occur during file upload with enhanced context
+    #[error(
+        "File '{filename}' already exists in '{directory}'.\nCurrent policy: {policy}\nSuggestion: Use --overwrite-files or --rename-files to handle duplicates differently"
+    )]
+    DuplicateFileError {
+        filename: String,
+        directory: String,
+        policy: String,
+    },
 
-    /// Uploaded hash not correct
-    #[error("File hash that was provided did not match checksum of uploaded file")]
-    UploadHashMismatchError,
+    /// Uploaded hash not correct with enhanced context
+    #[error(
+        "File integrity check failed for '{filename}'.\nExpected hash: {expected}\nActual hash: {actual}\nAlgorithm: {algorithm}\nSuggestion: Verify the file wasn't corrupted during upload or check your hash calculation"
+    )]
+    UploadHashMismatchError {
+        filename: String,
+        expected: String,
+        actual: String,
+        algorithm: String,
+    },
 
-    /// Upload not allowed
-    #[error("Upload not allowed to this directory")]
-    UploadForbiddenError,
+    /// Upload not allowed with enhanced context
+    #[error(
+        "Upload denied to '{directory}'.\nReason: {reason}\nAllowed directories: {allowed_dirs}\nSuggestion: {suggestion}"
+    )]
+    UploadForbiddenError {
+        directory: String,
+        reason: String,
+        allowed_dirs: String,
+        suggestion: String,
+    },
 
-    /// Any error related to an invalid path (failed to retrieve entry name, unexpected entry type, etc)
-    #[error("Invalid path\ncaused by: {0}")]
-    InvalidPathError(String),
+    /// Any error related to an invalid path with enhanced context
+    #[error("Invalid path operation: '{path}'\nReason: {reason}\nSuggestion: {suggestion}")]
+    InvalidPathError {
+        path: String,
+        reason: String,
+        suggestion: String,
+    },
 
-    /// Might occur if the user has insufficient permissions to create an entry in a given directory
-    #[error("Insufficient permissions to create file in {0}")]
-    InsufficientPermissionsError(String),
+    /// Might occur if the user has insufficient permissions with enhanced context
+    #[error(
+        "Insufficient permissions for operation.\nPath: '{path}'\nOperation: {operation}\nRequired permissions: {required}\nSuggestion: {suggestion}"
+    )]
+    InsufficientPermissionsError {
+        path: String,
+        operation: String,
+        required: String,
+        suggestion: String,
+    },
 
     /// Any error related to parsing
     #[error("Failed to parse {0}\ncaused by: {1}")]
@@ -91,13 +191,15 @@ impl ResponseError for RuntimeError {
         use RuntimeError as E;
         use StatusCode as S;
         match self {
-            E::IoError(_, _) => S::INTERNAL_SERVER_ERROR,
-            E::UploadHashMismatchError => S::BAD_REQUEST,
+            E::IoError { .. } => S::INTERNAL_SERVER_ERROR,
+            E::UploadHashMismatchError { .. } => S::BAD_REQUEST,
             E::MultipartError(_) => S::BAD_REQUEST,
-            E::DuplicateFileError => S::CONFLICT,
-            E::UploadForbiddenError => S::FORBIDDEN,
-            E::InvalidPathError(_) => S::BAD_REQUEST,
-            E::InsufficientPermissionsError(_) => S::FORBIDDEN,
+            E::DuplicateFileError { .. } => S::CONFLICT,
+            E::UploadForbiddenError { .. } => S::FORBIDDEN,
+            E::InvalidPathError { .. } => S::BAD_REQUEST,
+            E::InsufficientPermissionsError { .. } => {
+                S::FORBIDDEN
+            }
             E::ParseError(_, _) => S::BAD_REQUEST,
             E::ArchiveCreationError(_, err) => err.status_code(),
             E::ArchiveCreationDetailError(_) => S::INTERNAL_SERVER_ERROR,
@@ -178,5 +280,85 @@ fn map_error_page(req: &HttpRequest, head: &mut ResponseHead, body: BoxBody) -> 
 pub fn log_error_chain(description: String) {
     for cause in description.lines() {
         log::error!("{cause}");
+    }
+}
+
+/// Log configuration validation failures with structured context
+pub fn log_validation_failure(error: &ConfigValidationError, context: &str) {
+    match error {
+        ConfigValidationError::PortError { port, .. } => {
+            log::error!(
+                "Configuration validation failed in {}: Port conflict on port {}",
+                context,
+                port
+            );
+        }
+        ConfigValidationError::PathError { path, reason, .. } => {
+            log::error!(
+                "Configuration validation failed in {}: Path error for '{}' - {}",
+                context,
+                path,
+                reason
+            );
+        }
+        ConfigValidationError::OptionConflict {
+            primary_option,
+            conflicting_option,
+            reason,
+            ..
+        } => {
+            log::error!(
+                "Configuration validation failed in {}: Option conflict between '{}' and '{}' - {}",
+                context,
+                primary_option,
+                conflicting_option,
+                reason
+            );
+        }
+        ConfigValidationError::MissingDependency {
+            option,
+            required_option,
+            reason,
+            ..
+        } => {
+            log::error!(
+                "Configuration validation failed in {}: Missing dependency '{}' requires '{}' - {}",
+                context,
+                option,
+                required_option,
+                reason
+            );
+        }
+        ConfigValidationError::AuthError { reason, .. } => {
+            log::error!(
+                "Configuration validation failed in {}: Auth error - {}",
+                context,
+                reason
+            );
+        }
+        ConfigValidationError::TlsError { reason, .. } => {
+            log::error!(
+                "Configuration validation failed in {}: TLS error - {}",
+                context,
+                reason
+            );
+        }
+        ConfigValidationError::UploadError { reason, .. } => {
+            log::error!(
+                "Configuration validation failed in {}: Upload error - {}",
+                context,
+                reason
+            );
+        }
+        ConfigValidationError::ArchiveError { reason, .. } => {
+            log::error!(
+                "Configuration validation failed in {}: Archive error - {}",
+                context,
+                reason
+            );
+        }
+        ConfigValidationError::General { reason, .. } => {
+            log::error!("Configuration validation failed in {}: {}", context, reason);
+        }
     }
 }

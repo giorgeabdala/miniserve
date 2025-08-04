@@ -151,8 +151,5 @@ fn webdav_single_file_refuses_starting(tmpdir: TempDir) {
         .arg("--enable-webdav")
         .assert()
         .failure()
-        .stderr(contains(format!(
-            "Error: The --enable-webdav option was provided, but the serve path '{}' is a file",
-            FILES[0]
-        )));
+        .stderr(contains("Error: Option conflict: --enable-webdav cannot be used with file path."));
 }
