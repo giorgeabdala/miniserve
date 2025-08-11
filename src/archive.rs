@@ -81,13 +81,23 @@ fn tar_gz<W>(dir: &Path, skip_symlinks: bool, out: W) -> Result<(), RuntimeError
 where
     W: std::io::Write,
 {
-    let mut out = Encoder::new(out).map_err(|e| RuntimeError::IoError{operation: "create gzip encoder".to_string(), path: "".to_string(), source: e, suggestion: "".to_string()})?;
+    let mut out = Encoder::new(out).map_err(|e| RuntimeError::IoError {
+        operation: "create gzip encoder".to_string(),
+        path: "".to_string(),
+        source: e,
+        suggestion: "".to_string(),
+    })?;
 
     tar_dir(dir, skip_symlinks, &mut out)?;
 
     out.finish()
         .into_result()
-        .map_err(|e| RuntimeError::IoError{operation: "finish gzip encoding".to_string(), path: "".to_string(), source: e, suggestion: "".to_string()})?;
+        .map_err(|e| RuntimeError::IoError {
+            operation: "finish gzip encoding".to_string(),
+            path: "".to_string(),
+            source: e,
+            suggestion: "".to_string(),
+        })?;
 
     Ok(())
 }
@@ -119,13 +129,21 @@ fn tar_dir<W>(dir: &Path, skip_symlinks: bool, out: W) -> Result<(), RuntimeErro
 where
     W: std::io::Write,
 {
-    let inner_folder = dir.file_name().ok_or_else(|| {
-        RuntimeError::InvalidPathError{path: dir.display().to_string(), reason: "Directory name terminates in \"..\"".to_string(), suggestion: "".to_string()}
-    })?;
+    let inner_folder = dir
+        .file_name()
+        .ok_or_else(|| RuntimeError::InvalidPathError {
+            path: dir.display().to_string(),
+            reason: "Directory name terminates in \"..\"".to_string(),
+            suggestion: "".to_string(),
+        })?;
 
-    let directory = inner_folder.to_str().ok_or_else(|| {
-        RuntimeError::InvalidPathError{path: dir.display().to_string(), reason: "Directory name contains invalid UTF-8 characters".to_string(), suggestion: "".to_string()}
-    })?;
+    let directory = inner_folder
+        .to_str()
+        .ok_or_else(|| RuntimeError::InvalidPathError {
+            path: dir.display().to_string(),
+            reason: "Directory name contains invalid UTF-8 characters".to_string(),
+            suggestion: "".to_string(),
+        })?;
 
     tar(dir, directory.to_string(), skip_symlinks, out)
         .map_err(|e| RuntimeError::ArchiveCreationError("tarball".to_string(), Box::new(e)))
@@ -150,14 +168,22 @@ where
     // Recursively adds the content of src_dir into the archive stream
     tar_builder
         .append_dir_all(inner_folder, src_dir)
-        .map_err(|e| {
-            RuntimeError::IoError{operation: "append directory to tar archive".to_string(), path: src_dir.display().to_string(), source: e, suggestion: "".to_string()}
+        .map_err(|e| RuntimeError::IoError {
+            operation: "append directory to tar archive".to_string(),
+            path: src_dir.display().to_string(),
+            source: e,
+            suggestion: "".to_string(),
         })?;
 
     // Finish the archive
-    tar_builder.into_inner().map_err(|e| {
-        RuntimeError::IoError{operation: "finish writing tar archive".to_string(), path: "".to_string(), source: e, suggestion: "".to_string()}
-    })?;
+    tar_builder
+        .into_inner()
+        .map_err(|e| RuntimeError::IoError {
+            operation: "finish writing tar archive".to_string(),
+            path: "".to_string(),
+            source: e,
+            suggestion: "".to_string(),
+        })?;
 
     Ok(())
 }
@@ -196,9 +222,14 @@ where
     let options =
         write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let mut paths_queue: Vec<PathBuf> = vec![directory.to_path_buf()];
-    let zip_root_folder_name = directory.file_name().ok_or_else(|| {
-        RuntimeError::InvalidPathError{path: directory.display().to_string(), reason: "Directory name terminates in \"..\"".to_string(), suggestion: "".to_string()}
-    })?;
+    let zip_root_folder_name =
+        directory
+            .file_name()
+            .ok_or_else(|| RuntimeError::InvalidPathError {
+                path: directory.display().to_string(),
+                reason: "Directory name terminates in \"..\"".to_string(),
+                suggestion: "".to_string(),
+            })?;
 
     let mut zip_writer = ZipWriter::new(out);
     let mut buffer = Vec::new();
@@ -207,8 +238,13 @@ where
             RuntimeError::ArchiveCreationDetailError("Could not get path from queue".to_string())
         })?;
         let current_dir = next.as_path();
-        let directory_entry_iterator = std::fs::read_dir(current_dir)
-            .map_err(|e| RuntimeError::IoError{operation: "read directory".to_string(), path: current_dir.display().to_string(), source: e, suggestion: "".to_string()})?;
+        let directory_entry_iterator =
+            std::fs::read_dir(current_dir).map_err(|e| RuntimeError::IoError {
+                operation: "read directory".to_string(),
+                path: current_dir.display().to_string(),
+                source: e,
+                suggestion: "".to_string(),
+            })?;
         let zip_directory = Path::new(zip_root_folder_name).join(
             current_dir.strip_prefix(directory).map_err(|_| {
                 RuntimeError::ArchiveCreationDetailError(
@@ -220,25 +256,45 @@ where
         for entry in directory_entry_iterator {
             let entry_path = entry
                 .ok()
-                .ok_or_else(|| {
-                    RuntimeError::InvalidPathError{path: "".to_string(), reason: "Directory name terminates in \"..\"".to_string(), suggestion: "".to_string()}
+                .ok_or_else(|| RuntimeError::InvalidPathError {
+                    path: "".to_string(),
+                    reason: "Directory name terminates in \"..\"".to_string(),
+                    suggestion: "".to_string(),
                 })?
                 .path();
-            let entry_metadata = std::fs::metadata(entry_path.clone())
-                .map_err(|e| RuntimeError::IoError{operation: "get file metadata".to_string(), path: entry_path.display().to_string(), source: e, suggestion: "".to_string()})?;
+            let entry_metadata =
+                std::fs::metadata(entry_path.clone()).map_err(|e| RuntimeError::IoError {
+                    operation: "get file metadata".to_string(),
+                    path: entry_path.display().to_string(),
+                    source: e,
+                    suggestion: "".to_string(),
+                })?;
 
             if entry_metadata.file_type().is_symlink() && skip_symlinks {
                 continue;
             }
-            let current_entry_name = entry_path.file_name().ok_or_else(|| {
-                RuntimeError::InvalidPathError{path: entry_path.display().to_string(), reason: "Invalid file or directory name".to_string(), suggestion: "".to_string()}
-            })?;
+            let current_entry_name =
+                entry_path
+                    .file_name()
+                    .ok_or_else(|| RuntimeError::InvalidPathError {
+                        path: entry_path.display().to_string(),
+                        reason: "Invalid file or directory name".to_string(),
+                        suggestion: "".to_string(),
+                    })?;
             if entry_metadata.is_file() {
-                let mut f = File::open(&entry_path)
-                    .map_err(|e| RuntimeError::IoError{operation: "open file".to_string(), path: entry_path.display().to_string(), source: e, suggestion: "".to_string()})?;
-                f.read_to_end(&mut buffer).map_err(|e| {
-                    RuntimeError::IoError{operation: "read from file".to_string(), path: entry_path.display().to_string(), source: e, suggestion: "".to_string()}
+                let mut f = File::open(&entry_path).map_err(|e| RuntimeError::IoError {
+                    operation: "open file".to_string(),
+                    path: entry_path.display().to_string(),
+                    source: e,
+                    suggestion: "".to_string(),
                 })?;
+                f.read_to_end(&mut buffer)
+                    .map_err(|e| RuntimeError::IoError {
+                        operation: "read from file".to_string(),
+                        path: entry_path.display().to_string(),
+                        source: e,
+                        suggestion: "".to_string(),
+                    })?;
                 let relative_path = zip_directory.join(current_entry_name).into_os_string();
                 zip_writer
                     .start_file(relative_path.to_string_lossy(), options)
@@ -290,7 +346,12 @@ where
     })?;
 
     out.write_all(data.as_mut_slice())
-        .map_err(|e| RuntimeError::IoError{operation: "write zip archive".to_string(), path: "".to_string(), source: e, suggestion: "".to_string()})?;
+        .map_err(|e| RuntimeError::IoError {
+            operation: "write zip archive".to_string(),
+            path: "".to_string(),
+            source: e,
+            suggestion: "".to_string(),
+        })?;
 
     Ok(())
 }
@@ -299,13 +360,21 @@ fn zip_dir<W>(dir: &Path, skip_symlinks: bool, out: W) -> Result<(), RuntimeErro
 where
     W: std::io::Write,
 {
-    let inner_folder = dir.file_name().ok_or_else(|| {
-        RuntimeError::InvalidPathError{path: dir.display().to_string(), reason: "Directory name terminates in \"..\"".to_string(), suggestion: "".to_string()}
-    })?;
+    let inner_folder = dir
+        .file_name()
+        .ok_or_else(|| RuntimeError::InvalidPathError {
+            path: dir.display().to_string(),
+            reason: "Directory name terminates in \"..\"".to_string(),
+            suggestion: "".to_string(),
+        })?;
 
-    inner_folder.to_str().ok_or_else(|| {
-        RuntimeError::InvalidPathError{path: dir.display().to_string(), reason: "Directory name contains invalid UTF-8 characters".to_string(), suggestion: "".to_string()}
-    })?;
+    inner_folder
+        .to_str()
+        .ok_or_else(|| RuntimeError::InvalidPathError {
+            path: dir.display().to_string(),
+            reason: "Directory name contains invalid UTF-8 characters".to_string(),
+            suggestion: "".to_string(),
+        })?;
 
     zip_data(dir, skip_symlinks, out)
         .map_err(|e| RuntimeError::ArchiveCreationError("zip".to_string(), Box::new(e)))

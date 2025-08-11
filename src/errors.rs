@@ -19,7 +19,9 @@ pub enum StartupError {
     IoError(String, std::io::Error),
 
     /// In case miniserve was invoked without an interactive terminal and without an explicit path
-    #[error("Refusing to start as no explicit serve path was set and no interactive terminal was attached\nPlease set an explicit serve path like: `miniserve /my/path`")]
+    #[error(
+        "Refusing to start as no explicit serve path was set and no interactive terminal was attached\nPlease set an explicit serve path like: `miniserve /my/path`"
+    )]
     NoExplicitPathAndNoTerminal,
 
     /// In case miniserve was invoked with --no-symlinks but the serve path is a symlink
@@ -31,6 +33,7 @@ pub enum StartupError {
 
     /// Configuration validation errors with detailed context
     #[error("Configuration validation failed: {0}")]
+    #[allow(dead_code)]
     ConfigValidationError(ConfigValidationError),
 }
 
@@ -81,14 +84,6 @@ pub enum ConfigValidationError {
     /// Upload configuration validation errors
     #[error("Upload configuration error: {reason}.\nSuggestion: {suggestion}")]
     UploadError { reason: String, suggestion: String },
-
-    /// Archive configuration errors
-    #[error("Archive configuration error: {reason}.\nSuggestion: {suggestion}")]
-    ArchiveError { reason: String, suggestion: String },
-
-    /// General validation errors with suggestions
-    #[error("Validation error: {reason}.\nSuggestion: {suggestion}")]
-    General { reason: String, suggestion: String },
 }
 
 #[derive(Debug, Error)]
@@ -197,9 +192,7 @@ impl ResponseError for RuntimeError {
             E::DuplicateFileError { .. } => S::CONFLICT,
             E::UploadForbiddenError { .. } => S::FORBIDDEN,
             E::InvalidPathError { .. } => S::BAD_REQUEST,
-            E::InsufficientPermissionsError { .. } => {
-                S::FORBIDDEN
-            }
+            E::InsufficientPermissionsError { .. } => S::FORBIDDEN,
             E::ParseError(_, _) => S::BAD_REQUEST,
             E::ArchiveCreationError(_, err) => err.status_code(),
             E::ArchiveCreationDetailError(_) => S::INTERNAL_SERVER_ERROR,
@@ -288,17 +281,12 @@ pub fn log_validation_failure(error: &ConfigValidationError, context: &str) {
     match error {
         ConfigValidationError::PortError { port, .. } => {
             log::error!(
-                "Configuration validation failed in {}: Port conflict on port {}",
-                context,
-                port
+                "Configuration validation failed in {context}: Port conflict on port {port}"
             );
         }
         ConfigValidationError::PathError { path, reason, .. } => {
             log::error!(
-                "Configuration validation failed in {}: Path error for '{}' - {}",
-                context,
-                path,
-                reason
+                "Configuration validation failed in {context}: Path error for '{path}' - {reason}"
             );
         }
         ConfigValidationError::OptionConflict {
@@ -308,11 +296,7 @@ pub fn log_validation_failure(error: &ConfigValidationError, context: &str) {
             ..
         } => {
             log::error!(
-                "Configuration validation failed in {}: Option conflict between '{}' and '{}' - {}",
-                context,
-                primary_option,
-                conflicting_option,
-                reason
+                "Configuration validation failed in {context}: Option conflict between '{primary_option}' and '{conflicting_option}' - {reason}"
             );
         }
         ConfigValidationError::MissingDependency {
@@ -322,43 +306,17 @@ pub fn log_validation_failure(error: &ConfigValidationError, context: &str) {
             ..
         } => {
             log::error!(
-                "Configuration validation failed in {}: Missing dependency '{}' requires '{}' - {}",
-                context,
-                option,
-                required_option,
-                reason
+                "Configuration validation failed in {context}: Missing dependency '{option}' requires '{required_option}' - {reason}"
             );
         }
         ConfigValidationError::AuthError { reason, .. } => {
-            log::error!(
-                "Configuration validation failed in {}: Auth error - {}",
-                context,
-                reason
-            );
+            log::error!("Configuration validation failed in {context}: Auth error - {reason}");
         }
         ConfigValidationError::TlsError { reason, .. } => {
-            log::error!(
-                "Configuration validation failed in {}: TLS error - {}",
-                context,
-                reason
-            );
+            log::error!("Configuration validation failed in {context}: TLS error - {reason}");
         }
         ConfigValidationError::UploadError { reason, .. } => {
-            log::error!(
-                "Configuration validation failed in {}: Upload error - {}",
-                context,
-                reason
-            );
-        }
-        ConfigValidationError::ArchiveError { reason, .. } => {
-            log::error!(
-                "Configuration validation failed in {}: Archive error - {}",
-                context,
-                reason
-            );
-        }
-        ConfigValidationError::General { reason, .. } => {
-            log::error!("Configuration validation failed in {}: {}", context, reason);
+            log::error!("Configuration validation failed in {context}: Upload error - {reason}");
         }
     }
 }

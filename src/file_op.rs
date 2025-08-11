@@ -93,10 +93,20 @@ pub async fn recursive_dir_size(dir: &Path) -> Result<u64, RuntimeError> {
                         ErrorKind::PermissionDenied => warn!(
                             "Error trying to read file when calculating dir size: {io_err}, ignoring"
                         ),
-                        _ => return Err(RuntimeError::InvalidPathError{path: dir.display().to_string(), reason: "No such file or directory".to_string(), suggestion: "Check the path".to_string()}),
+                        _ => {
+                            return Err(RuntimeError::InvalidPathError {
+                                path: dir.display().to_string(),
+                                reason: "No such file or directory".to_string(),
+                                suggestion: "Check the path".to_string(),
+                            });
+                        }
                     }
                 } else {
-                    return Err(RuntimeError::InvalidPathError{path: "".to_string(), reason: "Error trying to read file when calculating dir size".to_string(), suggestion: "Check file permissions".to_string()});
+                    return Err(RuntimeError::InvalidPathError {
+                        path: "".to_string(),
+                        reason: "Error trying to read file when calculating dir size".to_string(),
+                        suggestion: "Check file permissions".to_string(),
+                    });
                 }
             }
             None => break,
@@ -118,7 +128,13 @@ async fn save_file(
 ) -> Result<u64, RuntimeError> {
     if file_path.exists() {
         match on_duplicate_files {
-            DuplicateFile::Error => return Err(RuntimeError::DuplicateFileError{filename: file_path.display().to_string(), directory: "".to_string(), policy: "Error".to_string()}),
+            DuplicateFile::Error => {
+                return Err(RuntimeError::DuplicateFileError {
+                    filename: file_path.display().to_string(),
+                    directory: "".to_string(),
+                    policy: "Error".to_string(),
+                });
+            }
             DuplicateFile::Overwrite => (),
             DuplicateFile::Rename => {
                 // extract extension of the file and the file stem without extension
@@ -164,9 +180,20 @@ async fn save_file(
 
     // Validate the the temporary file was created successfully.
     let named_temp_file = match named_temp_file_task {
-        Err(err) if err.kind() == ErrorKind::PermissionDenied => Err(
-            RuntimeError::InsufficientPermissionsError{path: file_path.display().to_string(), operation: "create temporary file".to_string(), required: "write".to_string(), suggestion: "Check directory permissions".to_string()}),
-        Err(err) => Err(RuntimeError::IoError{operation: "create temporary file".to_string(), path: file_path.display().to_string(), source: err, suggestion: "Check directory permissions".to_string()}),
+        Err(err) if err.kind() == ErrorKind::PermissionDenied => {
+            Err(RuntimeError::InsufficientPermissionsError {
+                path: file_path.display().to_string(),
+                operation: "create temporary file".to_string(),
+                required: "write".to_string(),
+                suggestion: "Check directory permissions".to_string(),
+            })
+        }
+        Err(err) => Err(RuntimeError::IoError {
+            operation: "create temporary file".to_string(),
+            path: file_path.display().to_string(),
+            source: err,
+            suggestion: "Check directory permissions".to_string(),
+        }),
         Ok(file) => Ok(file),
     }?;
 
@@ -176,7 +203,12 @@ async fn save_file(
     // on successful upload, we want to move it to the target directory.
     let (file, temp_path) = named_temp_file
         .keep()
-        .map_err(|err| RuntimeError::IoError{operation: "keep temporary file".to_string(), path: "".to_string(), source: err.error, suggestion: "Check directory permissions".to_string()})?;
+        .map_err(|err| RuntimeError::IoError {
+            operation: "keep temporary file".to_string(),
+            path: "".to_string(),
+            source: err.error,
+            suggestion: "Check directory permissions".to_string(),
+        })?;
     let mut temp_file = tokio::fs::File::from_std(file);
 
     let mut written_len = 0;
@@ -196,8 +228,12 @@ async fn save_file(
         // Write the bytes from the stream into our temporary file.
         if let Err(e) = temp_file.write_all(&bytes).await {
             // Failed to write to file. Drop it and return the error
-            save_upload_file_error =
-                Some(RuntimeError::IoError{operation: "write to temporary file".to_string(), path: temp_path.display().to_string(), source: e, suggestion: "Check directory permissions".to_string()});
+            save_upload_file_error = Some(RuntimeError::IoError {
+                operation: "write to temporary file".to_string(),
+                path: temp_path.display().to_string(),
+                source: e,
+                suggestion: "Check directory permissions".to_string(),
+            });
             break;
         }
         // record the bytes written to the file.
@@ -207,7 +243,12 @@ async fn save_file(
     if save_upload_file_error.is_none() {
         // Flush the changes to disk so that we are sure they are there.
         if let Err(e) = temp_file.flush().await {
-            save_upload_file_error = Some(RuntimeError::IoError{operation: "flush temporary file".to_string(), path: temp_path.display().to_string(), source: e, suggestion: "Check directory permissions".to_string()});
+            save_upload_file_error = Some(RuntimeError::IoError {
+                operation: "flush temporary file".to_string(),
+                path: temp_path.display().to_string(),
+                source: e,
+                suggestion: "Check directory permissions".to_string(),
+            });
         }
     }
 
@@ -240,7 +281,12 @@ async fn save_file(
                 "The expected file hash {expected_hash} did not match the calculated hash of {actual_hash}. This can be caused if a file upload was aborted."
             );
             let _ = tokio::fs::remove_file(&temp_path).await;
-            return Err(RuntimeError::UploadHashMismatchError{filename: file_path.display().to_string(), expected: expected_hash.to_string(), actual: actual_hash, algorithm: "SHA256/512".to_string()});
+            return Err(RuntimeError::UploadHashMismatchError {
+                filename: file_path.display().to_string(),
+                expected: expected_hash.to_string(),
+                actual: actual_hash,
+                algorithm: "SHA256/512".to_string(),
+            });
         }
     }
 
@@ -255,13 +301,21 @@ async fn save_file(
                 if let Err(e) = tokio::fs::remove_file(&temp_path).await {
                     error!("Failed to clean up temp file at {temp_path:?} with error {e:?}");
                 }
-                copy_result.map_err(|e| {
-                    RuntimeError::IoError{operation: "copy file".to_string(), path: file_path.display().to_string(), source: e, suggestion: "Check directory permissions".to_string()}
+                copy_result.map_err(|e| RuntimeError::IoError {
+                    operation: "copy file".to_string(),
+                    path: file_path.display().to_string(),
+                    source: e,
+                    suggestion: "Check directory permissions".to_string(),
                 })?;
             }
             _ => {
                 let _ = tokio::fs::remove_file(&temp_path).await;
-                return Err(RuntimeError::IoError{operation: "move temporary file".to_string(), path: file_path.display().to_string(), source: err, suggestion: "Check directory permissions".to_string()});
+                return Err(RuntimeError::IoError {
+                    operation: "move temporary file".to_string(),
+                    path: file_path.display().to_string(),
+                    source: err,
+                    suggestion: "Check directory permissions".to_string(),
+                });
             }
         }
     }
@@ -295,14 +349,28 @@ async fn handle_multipart(
     let field_name = field.name().expect("No name field found").to_string();
 
     match tokio::fs::metadata(&path).await {
-        Err(_) => Err(RuntimeError::InsufficientPermissionsError{path: path.display().to_string(), operation: "read metadata".to_string(), required: "read".to_string(), suggestion: "Check directory permissions".to_string()}),
-        Ok(metadata) if !metadata.is_dir() => Err(RuntimeError::InvalidPathError{path: path.display().to_string(), reason: "Cannot upload file to a path that is not a directory".to_string(), suggestion: "Specify a directory path for uploads".to_string()}),
+        Err(_) => Err(RuntimeError::InsufficientPermissionsError {
+            path: path.display().to_string(),
+            operation: "read metadata".to_string(),
+            required: "read".to_string(),
+            suggestion: "Check directory permissions".to_string(),
+        }),
+        Ok(metadata) if !metadata.is_dir() => Err(RuntimeError::InvalidPathError {
+            path: path.display().to_string(),
+            reason: "Cannot upload file to a path that is not a directory".to_string(),
+            suggestion: "Specify a directory path for uploads".to_string(),
+        }),
         Ok(_) => Ok(()),
     }?;
 
     if field_name == "mkdir" {
         if !allow_mkdir {
-            return Err(RuntimeError::InsufficientPermissionsError{path: path.display().to_string(), operation: "create directory".to_string(), required: "write".to_string(), suggestion: "Check directory permissions".to_string()});
+            return Err(RuntimeError::InsufficientPermissionsError {
+                path: path.display().to_string(),
+                operation: "create directory".to_string(),
+                required: "write".to_string(),
+                suggestion: "Check directory permissions".to_string(),
+            });
         }
 
         let mut user_given_path = PathBuf::new();
@@ -335,27 +403,55 @@ async fn handle_multipart(
             .components()
             .any(|c| c == Component::ParentDir)
         {
-            return Err(RuntimeError::InvalidPathError{path: user_given_path.display().to_string(), reason: "Cannot use '..' in mkdir path".to_string(), suggestion: "Specify a valid directory path".to_string()});
+            return Err(RuntimeError::InvalidPathError {
+                path: user_given_path.display().to_string(),
+                reason: "Cannot use '..' in mkdir path".to_string(),
+                suggestion: "Specify a valid directory path".to_string(),
+            });
         }
         // Hidden paths check
         sanitize_path(&user_given_path, allow_hidden_paths).ok_or_else(|| {
-            RuntimeError::InvalidPathError{path: user_given_path.display().to_string(), reason: "Cannot use hidden paths in mkdir path".to_string(), suggestion: "Specify a valid directory path".to_string()}
+            RuntimeError::InvalidPathError {
+                path: user_given_path.display().to_string(),
+                reason: "Cannot use hidden paths in mkdir path".to_string(),
+                suggestion: "Specify a valid directory path".to_string(),
+            }
         })?;
 
         // Ensure there are no illegal symlinks
         if !allow_symlinks {
             match contains_symlink(&absolute_path) {
-                Err(err) => Err(RuntimeError::InsufficientPermissionsError{path: err.to_string(), operation: "check for symlinks".to_string(), required: "read".to_string(), suggestion: "Check directory permissions".to_string()})?,
-                Ok(true) => Err(RuntimeError::InsufficientPermissionsError{path: user_given_path.display().to_string(), operation: "create directory".to_string(), required: "write".to_string(), suggestion: "Path traverses through a symlink".to_string()})?,
+                Err(err) => Err(RuntimeError::InsufficientPermissionsError {
+                    path: err.to_string(),
+                    operation: "check for symlinks".to_string(),
+                    required: "read".to_string(),
+                    suggestion: "Check directory permissions".to_string(),
+                })?,
+                Ok(true) => Err(RuntimeError::InsufficientPermissionsError {
+                    path: user_given_path.display().to_string(),
+                    operation: "create directory".to_string(),
+                    required: "write".to_string(),
+                    suggestion: "Path traverses through a symlink".to_string(),
+                })?,
                 Ok(false) => (),
             }
         }
 
         return match tokio::fs::create_dir_all(&absolute_path).await {
-            Err(err) if err.kind() == ErrorKind::PermissionDenied => Err(
-                RuntimeError::InsufficientPermissionsError{path: path.display().to_string(), operation: "create directory".to_string(), required: "write".to_string(), suggestion: "Check directory permissions".to_string()}
-            ),
-            Err(err) => Err(RuntimeError::IoError{operation: "create directory".to_string(), path: user_given_path.display().to_string(), source: err, suggestion: "Check directory permissions".to_string()}),
+            Err(err) if err.kind() == ErrorKind::PermissionDenied => {
+                Err(RuntimeError::InsufficientPermissionsError {
+                    path: path.display().to_string(),
+                    operation: "create directory".to_string(),
+                    required: "write".to_string(),
+                    suggestion: "Check directory permissions".to_string(),
+                })
+            }
+            Err(err) => Err(RuntimeError::IoError {
+                operation: "create directory".to_string(),
+                path: user_given_path.display().to_string(),
+                source: err,
+                suggestion: "Check directory permissions".to_string(),
+            }),
             Ok(_) => Ok(0),
         };
     }
@@ -371,14 +467,30 @@ async fn handle_multipart(
             )
         })?;
 
-    let filename_path = sanitize_path(Path::new(&filename), allow_hidden_paths)
-        .ok_or_else(|| RuntimeError::InvalidPathError{path: filename.to_string(), reason: "Invalid file name to upload".to_string(), suggestion: "Specify a valid file name".to_string()})?;
+    let filename_path =
+        sanitize_path(Path::new(&filename), allow_hidden_paths).ok_or_else(|| {
+            RuntimeError::InvalidPathError {
+                path: filename.to_string(),
+                reason: "Invalid file name to upload".to_string(),
+                suggestion: "Specify a valid file name".to_string(),
+            }
+        })?;
 
     // Ensure there are no illegal symlinks in the file upload path
     if !allow_symlinks {
         match contains_symlink(&path) {
-            Err(err) => Err(RuntimeError::InsufficientPermissionsError{path: err.to_string(), operation: "check for symlinks".to_string(), required: "read".to_string(), suggestion: "Check directory permissions".to_string()})?,
-            Ok(true) => Err(RuntimeError::InsufficientPermissionsError{path: path.display().to_string(), operation: "upload file".to_string(), required: "write".to_string(), suggestion: "Path traverses through a symlink".to_string()})?,
+            Err(err) => Err(RuntimeError::InsufficientPermissionsError {
+                path: err.to_string(),
+                operation: "check for symlinks".to_string(),
+                required: "read".to_string(),
+                suggestion: "Check directory permissions".to_string(),
+            })?,
+            Ok(true) => Err(RuntimeError::InsufficientPermissionsError {
+                path: path.display().to_string(),
+                operation: "upload file".to_string(),
+                required: "write".to_string(),
+                suggestion: "Path traverses through a symlink".to_string(),
+            })?,
             Ok(false) => (),
         }
     }
@@ -411,11 +523,21 @@ pub async fn upload_file(
 ) -> Result<HttpResponse, RuntimeError> {
     let conf = req.app_data::<web::Data<MiniserveConfig>>().unwrap();
     let upload_path = sanitize_path(&query.path, conf.show_hidden).ok_or_else(|| {
-        RuntimeError::InvalidPathError{path: query.path.display().to_string(), reason: "Invalid value for 'path' parameter".to_string(), suggestion: "Specify a valid path".to_string()}
+        RuntimeError::InvalidPathError {
+            path: query.path.display().to_string(),
+            reason: "Invalid value for 'path' parameter".to_string(),
+            suggestion: "Specify a valid path".to_string(),
+        }
     })?;
-    let app_root_dir = conf.path.canonicalize().map_err(|e| {
-        RuntimeError::IoError{operation: "canonicalize path".to_string(), path: conf.path.display().to_string(), source: e, suggestion: "Check if path exists".to_string()}
-    })?;
+    let app_root_dir = conf
+        .path
+        .canonicalize()
+        .map_err(|e| RuntimeError::IoError {
+            operation: "canonicalize path".to_string(),
+            path: conf.path.display().to_string(),
+            source: e,
+            suggestion: "Check if path exists".to_string(),
+        })?;
 
     // Disallow paths outside of allowed directories
     let upload_allowed = conf.allowed_upload_dir.is_empty()
@@ -425,7 +547,12 @@ pub async fn upload_file(
             .any(|s| upload_path.starts_with(s));
 
     if !upload_allowed {
-        return Err(RuntimeError::UploadForbiddenError{directory: upload_path.display().to_string(), reason: "Upload not allowed to this directory".to_string(), allowed_dirs: conf.allowed_upload_dir.join(", "), suggestion: "Check your configuration".to_string()});
+        return Err(RuntimeError::UploadForbiddenError {
+            directory: upload_path.display().to_string(),
+            reason: "Upload not allowed to this directory".to_string(),
+            allowed_dirs: conf.allowed_upload_dir.join(", "),
+            suggestion: "Check your configuration".to_string(),
+        });
     }
 
     // Disallow the target path to go outside of the served directory

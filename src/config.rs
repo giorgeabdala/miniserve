@@ -119,8 +119,7 @@ impl ConfigValidator for MiniserveConfigValidator {
                 return Err(ConfigValidationError::PortError {
                     port,
                     suggestion: format!(
-                        "Port {} is a privileged port (0-1023). Use a port >= 1024 or run with appropriate privileges",
-                        port
+                        "Port {port} is a privileged port (0-1023). Use a port >= 1024 or run with appropriate privileges"
                     ),
                 });
             }
@@ -134,8 +133,7 @@ impl ConfigValidator for MiniserveConfigValidator {
                     return Err(ConfigValidationError::PortError {
                         port,
                         suggestion: format!(
-                            "Port {} is already in use or unavailable. Try a different port or check what's using it with: netstat -tulpn | grep {}",
-                            port, port
+                            "Port {port} is already in use or unavailable. Try a different port or check what's using it with: netstat -tulpn | grep {port}"
                         ),
                     });
                 }
@@ -173,9 +171,7 @@ impl ConfigValidator for MiniserveConfigValidator {
                     errors.push(ConfigValidationError::PathError {
                         path: full_index_path.display().to_string(),
                         reason: "Index file does not exist".to_string(),
-                        suggestion: format!(
-                            "Create the index file or use a different filename. Common names: index.html, index.htm"
-                        ),
+                        suggestion: "Create the index file or use a different filename. Common names: index.html, index.htm".to_string(),
                     });
                 }
             }
@@ -378,14 +374,14 @@ impl ConfigValidator for MiniserveConfigValidator {
                     // Validate certificate and key can be read
                     if let Err(e) = std::fs::File::open(cert_path) {
                         errors.push(ConfigValidationError::TlsError {
-                            reason: format!("Cannot read TLS certificate: {}", e),
+                            reason: format!("Cannot read TLS certificate: {e}"),
                             suggestion: "Ensure the certificate file exists and is readable"
                                 .to_string(),
                         });
                     }
                     if let Err(e) = std::fs::File::open(key_path) {
                         errors.push(ConfigValidationError::TlsError {
-                            reason: format!("Cannot read TLS private key: {}", e),
+                            reason: format!("Cannot read TLS private key: {e}"),
                             suggestion: "Ensure the private key file exists and is readable"
                                 .to_string(),
                         });
@@ -664,7 +660,10 @@ impl MiniserveConfig {
             }
 
             // Return the first validation error as the primary error
-            if let Some(first_error) = validation_errors.into_iter().filter(|e| !matches!(e, ConfigValidationError::PathError { .. })).next() {
+            if let Some(first_error) = validation_errors
+                .into_iter()
+                .find(|e| !matches!(e, ConfigValidationError::PathError { .. }))
+            {
                 return Err(anyhow!(first_error));
             }
         }
@@ -814,7 +813,11 @@ impl MiniserveConfig {
             directory_size: args.directory_size,
             mkdir_enabled: args.mkdir_enabled,
             file_upload: args.allowed_upload_dir.is_some(),
-            web_upload_concurrency: if args.web_upload_concurrency == 0 { 1 } else { args.web_upload_concurrency },
+            web_upload_concurrency: if args.web_upload_concurrency == 0 {
+                1
+            } else {
+                args.web_upload_concurrency
+            },
             allowed_upload_dir,
             uploadable_media_type,
             tar_enabled: args.enable_tar,
@@ -837,8 +840,6 @@ impl MiniserveConfig {
         })
     }
 }
-
-
 
 #[cfg(test)]
 #[path = "config/tests.rs"]

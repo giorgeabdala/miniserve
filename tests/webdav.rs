@@ -151,5 +151,7 @@ fn webdav_single_file_refuses_starting(tmpdir: TempDir) {
         .arg("--enable-webdav")
         .assert()
         .failure()
-        .stderr(contains("Error: Option conflict: --enable-webdav cannot be used with file path."));
+        .stderr(contains(
+            "Error: Option conflict: --enable-webdav cannot be used with file path.",
+        ));
 }

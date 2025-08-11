@@ -1,5 +1,5 @@
 #! Comprehensive tests for configuration validation system
-//! 
+//!
 //! This module provides 90%+ test coverage for the MiniserveConfigValidator
 //! and related functionality, testing all validation rules, edge cases,
 //! and error scenarios.
@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use tempfile::{NamedTempFile, TempDir};
 
-use crate::{ 
+use crate::{
     args::{CliArgs, DuplicateFile, MediaType, SizeDisplay},
     config::{ConfigValidator, MiniserveConfig, MiniserveConfigValidator},
     errors::ConfigValidationError,
@@ -350,8 +350,8 @@ mod option_combination_tests {
 
         match result {
             Err(errors) => {
-                assert!(errors.iter().any(|e| matches!(e, 
-                    ConfigValidationError::OptionConflict { reason, .. } 
+                assert!(errors.iter().any(|e| matches!(e,
+                    ConfigValidationError::OptionConflict { reason, .. }
                     if reason.contains("Duplicate file handling options only apply when uploads are enabled")
                 )));
             }
@@ -370,8 +370,8 @@ mod option_combination_tests {
 
         match result {
             Err(errors) => {
-                assert!(errors.iter().any(|e| matches!(e, 
-                    ConfigValidationError::OptionConflict { reason, .. } 
+                assert!(errors.iter().any(|e| matches!(e,
+                    ConfigValidationError::OptionConflict { reason, .. }
                     if reason.contains("Media type restrictions only apply when uploads are enabled")
                 )));
             }
@@ -438,8 +438,8 @@ mod upload_validation_tests {
 
         match result {
             Err(errors) => {
-                assert!(errors.iter().any(|e| matches!(e, 
-                    ConfigValidationError::UploadError { reason, .. } 
+                assert!(errors.iter().any(|e| matches!(e,
+                    ConfigValidationError::UploadError { reason, .. }
                     if reason.contains("Temporary upload directory") && reason.contains("does not exist")
                 )));
             }
@@ -636,7 +636,11 @@ mod integration_tests {
         args.port = 0;
 
         let result = MiniserveConfig::try_from_args(args);
-        assert!(result.is_ok(), "expected Ok but got Err: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "expected Ok but got Err: {:?}",
+            result.err()
+        );
     }
 
     #[test]
