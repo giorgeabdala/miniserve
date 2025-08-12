@@ -179,6 +179,9 @@ pub struct MiniserveConfig {
 
     /// Optional external URL to prepend to file links in listings
     pub file_external_url: Option<String>,
+
+    /// Security middleware configuration
+    pub security_config: crate::security::SecurityConfig,
 }
 
 impl MiniserveConfig {
@@ -304,8 +307,8 @@ impl MiniserveConfig {
 
         Ok(Self {
             verbose: args.verbose,
-            path: args.path.unwrap_or_else(|| PathBuf::from(".")),
-            temp_upload_directory: args.temp_upload_directory,
+            path: args.path.clone().unwrap_or_else(|| PathBuf::from(".")),
+            temp_upload_directory: args.temp_upload_directory.clone(),
             port,
             interfaces,
             auth,
@@ -321,7 +324,7 @@ impl MiniserveConfig {
             css_route,
             default_color_scheme,
             default_color_scheme_dark,
-            index: args.index,
+            index: args.index.clone(),
             spa: args.spa,
             pretty_urls: args.pretty_urls,
             on_duplicate_files: args.on_duplicate_files,
@@ -336,8 +339,8 @@ impl MiniserveConfig {
             tar_gz_enabled: args.enable_tar_gz,
             zip_enabled: args.enable_zip,
             dirs_first: args.dirs_first,
-            title: args.title,
-            header: args.header,
+            title: args.title.clone(),
+            header: args.header.clone(),
             show_symlink_info: args.show_symlink_info,
             hide_version_footer: args.hide_version_footer,
             hide_theme_selector: args.hide_theme_selector,
@@ -348,7 +351,58 @@ impl MiniserveConfig {
             tls_rustls_config: tls_rustls_server_config,
             compress_response: args.compress_response,
             show_exact_bytes,
-            file_external_url: args.file_external_url,
+            file_external_url: args.file_external_url.clone(),
+            security_config: build_security_config(
+                args.security_headers,
+                args.rate_limit,
+                args.max_request_size,
+                args.rate_limit_requests,
+                args.rate_limit_window,
+                &args.csp,
+                args.hsts_max_age,
+            ),
         })
+    }
+}
+
+/// Build security configuration from CLI args
+fn build_security_config(
+    security_headers: bool,
+    rate_limit: bool,
+    max_request_size: usize,
+    rate_limit_requests: u32,
+    rate_limit_window: u64,
+    csp: &Option<String>,
+    hsts_max_age: u32,
+) -> crate::security::SecurityConfig {
+    use crate::security::{RateLimitConfig, SecurityConfig, SecurityHeadersConfig};
+
+    let mut headers_config = SecurityHeadersConfig::default();
+
+    // Override CSP if provided
+    if let Some(csp_value) = csp {
+        headers_config.csp = Some(csp_value.clone());
+    }
+
+    // Configure HSTS
+    if hsts_max_age > 0 {
+        headers_config.hsts_max_age = Some(hsts_max_age);
+    } else {
+        headers_config.hsts_max_age = None;
+    }
+
+    let rate_limit_config = RateLimitConfig {
+        max_requests: rate_limit_requests,
+        window_size: rate_limit_window,
+        enable_burst: true,
+        burst_size: (rate_limit_requests / 4).max(5), // 25% of max requests or minimum 5
+    };
+
+    SecurityConfig {
+        enable_security_headers: security_headers,
+        enable_rate_limiting: rate_limit,
+        max_request_size,
+        rate_limit_config,
+        headers_config,
     }
 }

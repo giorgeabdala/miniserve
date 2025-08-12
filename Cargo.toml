@@ -51,6 +51,7 @@ regex = "1"
 rustls = { version = "0.23", features = ["ring"], optional = true, default-features = false }
 rustls-pemfile = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sha2 = "0.10"
 simplelog = "0.12"
 socket2 = "0.6"

@@ -37,6 +37,7 @@ mod file_utils;
 mod listing;
 mod pipe;
 mod renderer;
+mod security;
 mod webdav_fs;
 
 use crate::config::MiniserveConfig;
@@ -216,8 +217,28 @@ async fn run(miniserve_config: MiniserveConfig) -> Result<(), StartupError> {
         .join("\n"),
     );
 
+    let security_middleware =
+        security::SecurityMiddleware::new(miniserve_config.security_config.clone());
+
+    let rate_limiter_state_for_cleanup = security_middleware.rate_limiter.clone();
+
+    // Spawn a cleanup thread for the rate limiter
+    if miniserve_config.security_config.enable_rate_limiting {
+        thread::spawn(move || {
+            info!("Starting rate limiter cleanup thread.");
+            loop {
+                thread::sleep(Duration::from_secs(30));
+                security::cleanup_rate_limiter(
+                    &rate_limiter_state_for_cleanup,
+                    Duration::from_secs(60 * 60),
+                ); // Clean up entries older than 1 hour
+            }
+        });
+    }
+
     let srv = actix_web::HttpServer::new(move || {
         App::new()
+            .wrap(security_middleware.clone())
             .wrap(configure_header(&inside_config.clone()))
             .app_data(web::Data::new(inside_config.clone()))
             .app_data(stylesheet.clone())

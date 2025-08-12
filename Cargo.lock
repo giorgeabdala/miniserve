@@ -2233,6 +2233,7 @@ dependencies = [
  "rustls-pemfile",
  "select",
  "serde",
+ "serde_json",
  "sha2",
  "simplelog",
  "socket2 0.6.0",

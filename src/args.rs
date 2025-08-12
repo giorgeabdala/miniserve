@@ -400,11 +400,117 @@ pub struct CliArgs {
     /// The user should take care this results in a valid URL, no further checks are being done.
     #[arg(long = "file-external-url", env = "MINISERVE_FILE_EXTERNAL_URL")]
     pub file_external_url: Option<String>,
+
+    /// Enable security headers (CSP, HSTS, X-Frame-Options, etc.)
+    ///
+    /// Adds modern web security headers to responses to improve security posture.
+    /// This includes Content-Security-Policy, Strict-Transport-Security,
+    /// X-Frame-Options, X-Content-Type-Options, and other security headers.
+    #[arg(long = "security-headers", env = "MINISERVE_SECURITY_HEADERS")]
+    pub security_headers: bool,
+
+    /// Enable rate limiting per IP address
+    ///
+    /// Enables request rate limiting using a sliding window algorithm
+    /// to protect against denial of service attacks and excessive resource usage.
+    /// Default: 60 requests per minute per IP address.
+    #[arg(long = "rate-limit", env = "MINISERVE_RATE_LIMIT")]
+    pub rate_limit: bool,
+
+    /// Maximum request size in bytes
+    ///
+    /// Sets the maximum allowed size for incoming requests to prevent
+    /// large payload denial of service attacks. Requests exceeding this
+    /// size will be rejected with a 413 Payload Too Large response.
+    #[arg(
+        long = "max-request-size",
+        default_value = "104857600", // 100MB
+        env = "MINISERVE_MAX_REQUEST_SIZE",
+        value_parser = parse_size
+    )]
+    pub max_request_size: usize,
+
+    /// Rate limit: maximum requests per window (default: 60)
+    ///
+    /// Configures the maximum number of requests allowed per time window
+    /// when rate limiting is enabled.
+    #[arg(
+        long = "rate-limit-requests",
+        default_value = "60",
+        env = "MINISERVE_RATE_LIMIT_REQUESTS",
+        requires = "rate_limit"
+    )]
+    pub rate_limit_requests: u32,
+
+    /// Rate limit: time window in seconds (default: 60)
+    ///
+    /// Configures the time window for rate limiting in seconds.
+    /// The sliding window algorithm tracks requests within this duration.
+    #[arg(
+        long = "rate-limit-window",
+        default_value = "60",
+        env = "MINISERVE_RATE_LIMIT_WINDOW",
+        requires = "rate_limit"
+    )]
+    pub rate_limit_window: u64,
+
+    /// Content Security Policy header value
+    ///
+    /// Custom Content Security Policy to override the default secure policy.
+    /// Use with caution as incorrect CSP values can break functionality.
+    #[arg(long = "csp", env = "MINISERVE_CSP", requires = "security_headers")]
+    pub csp: Option<String>,
+
+    /// HSTS max-age in seconds (default: 31536000 = 1 year)
+    ///
+    /// Sets the max-age value for HTTP Strict Transport Security header.
+    /// Set to 0 to disable HSTS.
+    #[arg(
+        long = "hsts-max-age",
+        default_value = "31536000",
+        env = "MINISERVE_HSTS_MAX_AGE",
+        requires = "security_headers"
+    )]
+    pub hsts_max_age: u32,
 }
 
 /// Checks whether an interface is valid, i.e. it can be parsed into an IP address
 fn parse_interface(src: &str) -> Result<IpAddr, std::net::AddrParseError> {
     src.parse::<IpAddr>()
+}
+
+/// Parse size with optional unit suffixes (B, K, M, G)
+pub fn parse_size(src: &str) -> Result<usize, String> {
+    let src = src.trim().to_uppercase();
+
+    if let Ok(size) = src.parse::<usize>() {
+        return Ok(size);
+    }
+
+    let (number_str, multiplier) = if let Some(without_b) = src.strip_suffix('B') {
+        if let Some(stripped) = without_b.strip_suffix('K') {
+            (stripped, 1024)
+        } else if let Some(stripped) = without_b.strip_suffix('M') {
+            (stripped, 1024 * 1024)
+        } else if let Some(stripped) = without_b.strip_suffix('G') {
+            (stripped, 1024 * 1024 * 1024)
+        } else {
+            (without_b, 1)
+        }
+    } else if let Some(stripped) = src.strip_suffix('K') {
+        (stripped, 1024)
+    } else if let Some(stripped) = src.strip_suffix('M') {
+        (stripped, 1024 * 1024)
+    } else if let Some(stripped) = src.strip_suffix('G') {
+        (stripped, 1024 * 1024 * 1024)
+    } else {
+        return Err(format!("Invalid size format: {src}"));
+    };
+
+    match number_str.parse::<usize>() {
+        Ok(number) => Ok(number * multiplier),
+        Err(_) => Err(format!("Invalid size format: {src}")),
+    }
 }
 
 /// Validate that a path passed in is a directory and it exists.
